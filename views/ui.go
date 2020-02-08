@@ -1,9 +1,15 @@
 package views
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/SAIKAII/skResk-Infra/httpclient"
+	"github.com/SAIKAII/skResk-Infra/lb"
+	"io"
+	"io/ioutil"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -16,6 +22,11 @@ import (
 	"github.com/SAIKAII/skResk-Infra/base"
 	"github.com/SAIKAII/skResk-ui/core/users"
 	"github.com/kataras/iris"
+)
+
+var (
+	accountAppName  string
+	envelopeAppName string
 )
 
 type MobileView struct {
@@ -66,6 +77,9 @@ func (m *MobileView) Init() {
 	// 发红包
 	m.groupRouter.Get("/sending", m.sendingHandler)
 	m.groupRouter.Post("/sending", m.sendingSubmitHandler)
+
+	accountAppName = fmt.Sprintf("http://%s/", base.Props().GetDefault("accountAppName", "skResk-Account"))
+	envelopeAppName = fmt.Sprintf("http://%s/", base.Props().GetDefault("envelopeAppName", "skResk-Envelope"))
 }
 
 func (m *MobileView) logoutHandler(ctx iris.Context) {
@@ -111,8 +125,20 @@ func (m *MobileView) loginSubmitHandler(ctx iris.Context) {
 
 func (m *MobileView) homeHandler(ctx iris.Context) {
 	userId := ctx.GetCookie("userId")
-	es := services.GetRedEnvelopeService()
-	orders := es.ListSent(userId, 0, 200)
+	body := strings.NewReader(fmt.Sprintf("userId=%s&offset=0&limit=200", userId))
+	d := SendRequest("POST", "http://skResk-Envelope/listsent", body)
+	if d == nil {
+		logrus.Error("获取我发送的红包信息出错")
+		return
+	}
+
+	var orders []services.RedEnvelopeGoodsDTO
+	err := json.Unmarshal(d, &orders)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+
 	ctx.ViewData("orders", orders)
 	ctx.ViewData("format", services.DefaultTimeFarmat)
 	_ = ctx.View("ui/home.html")
@@ -121,8 +147,19 @@ func (m *MobileView) homeHandler(ctx iris.Context) {
 // 我抢到的红包列表：recv_list.html /recvd/list
 func (m *MobileView) receivedListHandler(ctx iris.Context) {
 	userId := ctx.GetCookie("userId")
-	es := services.GetRedEnvelopeService()
-	items := es.ListReceived(userId, 0, 100)
+	body := strings.NewReader(fmt.Sprintf("userId=%s&offset=0&limit=200", userId))
+	d := SendRequest("POST", "http://skResk-Envelope/listreceived", body)
+	if d == nil {
+		logrus.Error("获取我抢到的红包信息出错")
+		return
+	}
+
+	var items []services.RedEnvelopeItemDTO
+	err := json.Unmarshal(d, &items)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
 	ctx.ViewData("items", items)
 	ctx.ViewData("format", services.DefaultTimeFarmat)
 
@@ -132,26 +169,34 @@ func (m *MobileView) receivedListHandler(ctx iris.Context) {
 // 红包记录：re_one.html /list
 func (m *MobileView) listHandler(ctx iris.Context) {
 	envelopeNo := ctx.URLParamTrim("id")
-	es := services.GetRedEnvelopeService()
-	order := es.Get(envelopeNo)
+	d := SendRequest("GET", fmt.Sprintf("http://skResk-Envelope/listorder?envelopeNo=%s", envelopeNo), nil)
+	if d == nil {
+		logrus.Error("获取单个商品信息出错")
+		return
+	}
+	order := &services.RedEnvelopeGoodsDTO{}
+	err := json.Unmarshal(d, order)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
 	if order != nil {
-		items := es.ListItems(envelopeNo)
+		d = SendRequest("GET", fmt.Sprintf("http://skResk-Envelope/listitems?envelopeNo=%s", envelopeNo), nil)
+		if d == nil {
+			logrus.Error("获取抢红包用户信息出错")
+			return
+		}
+		var items []services.RedEnvelopeItemDTO
+		err = json.Unmarshal(d, &items)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
 		totalAmount := decimal.NewFromFloat(0)
-		t1, t2 := time.Unix(int64(0), int64(0)), time.Unix(int64(0), int64(0))
-		for i, v := range items {
-			if i == 0 {
-				t1 = v.CreatedAt
-				t2 = v.CreatedAt
-			} else {
-				if t1.After(v.CreatedAt) {
-					t1 = v.CreatedAt
-				}
-				if t2.Before(v.CreatedAt) {
-					t2 = v.CreatedAt
-				}
-			}
+		for _, v := range items {
 			totalAmount = totalAmount.Add(v.Amount)
 		}
+		t1, t2 := order.CreatedAt, order.UpdatedAt
 		ctx.ViewData("items", items)
 		ctx.ViewData("size", len(items))
 		ctx.ViewData("totalAmount", totalAmount)
@@ -189,8 +234,18 @@ func (m *MobileView) listHandler(ctx iris.Context) {
 // 红包详情：re_details.html /details
 func (m *MobileView) detailsHandler(ctx iris.Context) {
 	envelopeNo := ctx.URLParamTrim("id")
-	es := services.GetRedEnvelopeService()
-	order := es.Get(envelopeNo)
+	d := SendRequest("GET", fmt.Sprintf("http://skResk-Envelope/details?envelopeNo=%s", envelopeNo), nil)
+	if d == nil {
+		logrus.Error("获取红包详情出错")
+		return
+	}
+	order := &services.RedEnvelopeGoodsDTO{}
+	err := json.Unmarshal(d, order)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+
 	ctx.ViewData("order", order)
 	ctx.ViewData("hasOrder", order != nil)
 	ctx.ViewData("format", services.DefaultTimeFarmat)
@@ -199,8 +254,19 @@ func (m *MobileView) detailsHandler(ctx iris.Context) {
 
 // 可抢红包：rev_home.html /rev/home
 func (m *MobileView) receiveHomeHandler(ctx iris.Context) {
-	es := services.GetRedEnvelopeService()
-	orders := es.ListReceivable(0, 200)
+	body := strings.NewReader("offset=0&limit=200")
+	d := SendRequest("POST", "http://skResk-Envelope/listreceviable", body)
+	if d == nil {
+		logrus.Error("获取可抢红包信息出错")
+		return
+	}
+	var orders []services.RedEnvelopeGoodsDTO
+	err := json.Unmarshal(d, &orders)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+
 	ctx.ViewData("orders", orders)
 	ctx.ViewData("hasOrder", len(orders) > 0)
 	ctx.ViewData("format", services.DefaultTimeFarmat)
@@ -212,22 +278,38 @@ func (m *MobileView) receiveSubmitHandler(ctx iris.Context) {
 	envelopeNo := ctx.URLParamTrim("id")
 	userId := ctx.GetCookie("userId")
 	username := ctx.GetCookie("username")
-
-	es := services.GetRedEnvelopeService()
-	dto := services.RedEnvelopeReceiveDTO{
-		EnvelopeNo:   envelopeNo,
-		RecvUsername: username,
-		RecvUserId:   userId,
+	body := strings.NewReader(fmt.Sprintf("envelopeNo=%s&userId=%s&username=%s", envelopeNo, userId, username))
+	d := SendRequest("POST", "http://skResk-Envelope/receive", body)
+	if d == nil {
+		logrus.Error("抢红包出错")
+		return
 	}
-	item, err := es.Receive(dto)
+	item := &services.RedEnvelopeGoodsDTO{}
+	err := json.Unmarshal(d, item)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+
 	msg := ""
-	if err == nil {
+	if d != nil {
 		ctx.ViewData("hasReceived", true)
 	} else {
 		ctx.ViewData("hasReceived", false)
-		msg = err.Error()
+		msg = "抢红包失败"
 	}
-	order := es.Get(envelopeNo)
+
+	d = SendRequest("GET", fmt.Sprintf("http://skResk-Envelope/listorder?envelopeNo=%s", envelopeNo), nil)
+	if d == nil {
+		logrus.Error(err)
+		return
+	}
+	order := &services.RedEnvelopeGoodsDTO{}
+	err = json.Unmarshal(d, order)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
 	ctx.ViewData("order", order)
 	ctx.ViewData("item", item)
 	ctx.ViewData("hasOrder", order != nil)
@@ -261,9 +343,15 @@ func (m *MobileView) sendingSubmitHandler(ctx iris.Context) {
 		Amount:       form.Amount,
 		Quantity:     form.Quantity,
 	}
-
-	service := services.GetRedEnvelopeService()
-	activity, err := service.SendOut(dto)
+	d, _ := json.Marshal(dto)
+	body := strings.NewReader(string(d))
+	d = SendRequest("POST", "http://skResk-Envelope/sendout", body)
+	if d == nil {
+		logrus.Error("发红包出错")
+		return
+	}
+	activity := &services.RedEnvelopeActivity{}
+	err = json.Unmarshal(d, activity)
 	if err != nil {
 		logrus.Error(err)
 		ctx.ViewData("msg", "发红包失败，系统出错")
@@ -272,4 +360,28 @@ func (m *MobileView) sendingSubmitHandler(ctx iris.Context) {
 	}
 	ctx.ViewData("activity", activity)
 	ctx.Redirect("/envelope/home")
+}
+
+func SendRequest(method, url string, body io.Reader) []byte {
+	ec := base.EurekaClient()
+	apps := &lb.Apps{Client: ec}
+	c := httpclient.NewHttpClient(apps, nil)
+	req, err := c.NewRequest(method, url, body, nil)
+	if err != nil {
+		logrus.Error(err)
+		return nil
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	res, err := c.Do(req)
+	if err != nil {
+		logrus.Error(err)
+		return nil
+	}
+	res.Body.Close()
+	d, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		logrus.Error(err)
+		return nil
+	}
+	return d
 }

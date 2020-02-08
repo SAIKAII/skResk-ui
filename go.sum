@@ -12,6 +12,8 @@ github.com/SAIKAII/skResk-Envelope v0.1.0 h1:Z9znZ5fgKDMkbbTMou6dM/Zq4obTFDL5kUy
 github.com/SAIKAII/skResk-Envelope v0.1.0/go.mod h1:fVd18baKtChLbYMPNM8+fQviQuZ7j+uMgvco42w5R50=
 github.com/SAIKAII/skResk-Infra v0.2.1 h1:LPKGgmzM6c4cXc8RCr7V+rW7cpnP1K4Z0o4t4r1SVI8=
 github.com/SAIKAII/skResk-Infra v0.2.1/go.mod h1:jp06gLZJkH3ck5ttOVi5YxSvZxd2wKeZeed3Em0lYrQ=
+github.com/SAIKAII/skResk-Infra v0.2.2 h1:jXrHAgdmCBPFWYRGL722j+8MFzBbGYiC8qH51VytZi8=
+github.com/SAIKAII/skResk-Infra v0.2.2/go.mod h1:jp06gLZJkH3ck5ttOVi5YxSvZxd2wKeZeed3Em0lYrQ=
 github.com/Shopify/goreferrer v0.0.0-20181106222321-ec9c9a553398 h1:WDC6ySpJzbxGWFh4aMxFFC28wwGp5pEuoTtvA4q/qQ4=
 github.com/Shopify/goreferrer v0.0.0-20181106222321-ec9c9a553398/go.mod h1:a1uqRtAwp2Xwc6WNPJEufxJ7fx3npB4UV/JOLmbu5I0=
 github.com/ajg/form v1.5.1 h1:t9c7v8JUKu/XxOGBU0yjNpaMloxGEJhUkqFRq0ibGeU=
